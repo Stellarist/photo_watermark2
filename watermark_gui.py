@@ -45,9 +45,37 @@ class WatermarkApp:
         main_frame = ttk.Frame(self.root)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
-        # Left control panel
-        left_panel = ttk.Frame(main_frame)
-        left_panel.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10))
+        # Left control panel (scrollable)
+        left_container = ttk.Frame(main_frame)
+        left_container.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10))
+        
+        self.left_canvas = tk.Canvas(left_container, highlightthickness=0)
+        left_scrollbar = ttk.Scrollbar(left_container, orient=tk.VERTICAL, command=self.left_canvas.yview)
+        self.left_canvas.configure(yscrollcommand=left_scrollbar.set)
+        
+        left_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.left_canvas.pack(side=tk.LEFT, fill=tk.Y, expand=False)
+        
+        left_panel = ttk.Frame(self.left_canvas)
+        self.left_canvas.create_window((0, 0), window=left_panel, anchor=tk.NW)
+        
+        # Update scrollregion when content changes
+        def _on_left_panel_configure(event):
+            self.left_canvas.configure(scrollregion=self.left_canvas.bbox("all"))
+            # Keep a reasonable width for the canvas to avoid horizontal scroll
+            self.left_canvas.configure(width=min(420, left_panel.winfo_reqwidth()))
+        left_panel.bind("<Configure>", _on_left_panel_configure)
+        
+        # Enable mouse wheel scrolling when cursor is over the left panel
+        def _bind_wheel(event):
+            self.left_canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        def _unbind_wheel(event):
+            self.left_canvas.unbind_all("<MouseWheel>")
+        def _on_mousewheel(event):
+            # On Windows, delta is multiples of 120
+            self.left_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        left_panel.bind("<Enter>", _bind_wheel)
+        left_panel.bind("<Leave>", _unbind_wheel)
         
         # Right preview panel
         right_panel = ttk.Frame(main_frame)
