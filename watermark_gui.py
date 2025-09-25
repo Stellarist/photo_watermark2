@@ -9,6 +9,7 @@ from typing import List, Dict, Optional, Tuple
 from PIL import Image, ImageDraw, ImageFont, ImageTk, ImageColor
 import threading
 import queue
+import re
 
 class WatermarkApp:
     def __init__(self, root):
@@ -33,6 +34,7 @@ class WatermarkApp:
             'image_opacity': 80
         }
         self.templates = {}
+        self.templates_dir = Path("templates")
         self.output_dir = None
         self.preview_image = None
         self.original_image = None
@@ -913,7 +915,7 @@ class WatermarkApp:
         }
         
         self.templates[template_name] = template
-        self.save_templates()
+        self._save_template_to_file(template_name, template)
         self.update_template_list()
         messagebox.showinfo("Success", f"Template '{template_name}' saved")
     
@@ -960,8 +962,17 @@ class WatermarkApp:
         
         template_name = self.template_listbox.get(selection[0])
         if messagebox.askyesno("Confirm", f"Are you sure to delete template '{template_name}'?"):
-            del self.templates[template_name]
-            self.save_templates()
+            # Remove from memory
+            if template_name in self.templates:
+                del self.templates[template_name]
+            # Remove file
+            try:
+                self.templates_dir.mkdir(parents=True, exist_ok=True)
+                file_path = self.templates_dir / f"{self._sanitize_template_name(template_name)}.json"
+                if file_path.exists():
+                    file_path.unlink()
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to delete template file: {e}")
             self.update_template_list()
             messagebox.showinfo("Success", f"Template '{template_name}' deleted")
     
@@ -976,24 +987,46 @@ class WatermarkApp:
             self.template_listbox.insert(tk.END, template_name)
     
     def load_templates(self):
-        """Load templates"""
+        """Load templates from templates/ directory (each template as a JSON file)."""
         try:
-            config_file = Path("watermark_templates.json")
-            if config_file.exists():
-                with open(config_file, 'r', encoding='utf-8') as f:
-                    self.templates = json.load(f)
-                self.update_template_list()
+            self.templates = {}
+            self.templates_dir.mkdir(parents=True, exist_ok=True)
+            for file_path in self.templates_dir.glob('*.json'):
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                    # Determine template name from filename (without extension)
+                    name = file_path.stem
+                    if isinstance(data, dict) and 'watermark_type' in data:
+                        # Single-template file
+                        self.templates[name] = data
+                    elif isinstance(data, dict):
+                        # Legacy multi-template format: merge entries
+                        for k, v in data.items():
+                            if isinstance(v, dict):
+                                self.templates[k] = v
+                except Exception as e:
+                    print(f"Failed to load template file {file_path}: {e}")
+            self.update_template_list()
         except Exception as e:
             print(f"Failed to load templates: {e}")
     
-    def save_templates(self):
-        """Save templates"""
+    def _sanitize_template_name(self, name: str) -> str:
+        """Sanitize template name to a safe filename for Windows."""
+        # Remove invalid chars <>:"/\|?* and trim
+        name = re.sub(r'[<>:"/\\|?*]+', '', name).strip()
+        return name or "template"
+
+    def _save_template_to_file(self, name: str, template: dict) -> None:
+        """Persist a single template into templates/{name}.json"""
         try:
-            config_file = Path("watermark_templates.json")
-            with open(config_file, 'w', encoding='utf-8') as f:
-                json.dump(self.templates, f, ensure_ascii=False, indent=2)
+            self.templates_dir.mkdir(parents=True, exist_ok=True)
+            safe = self._sanitize_template_name(name)
+            file_path = self.templates_dir / f"{safe}.json"
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(template, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            print(f"Failed to save templates: {e}")
+            messagebox.showerror("Error", f"Failed to save template file: {e}")
 
 
 def main():
