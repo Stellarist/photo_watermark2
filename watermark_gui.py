@@ -4,6 +4,7 @@ from tkinter import scrolledtext
 import os
 import json
 from pathlib import Path
+from datetime import datetime
 from typing import List, Dict, Optional, Tuple
 from PIL import Image, ImageDraw, ImageFont, ImageTk, ImageColor
 import threading
@@ -44,6 +45,13 @@ class WatermarkApp:
         # Main frame
         main_frame = ttk.Frame(self.root)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Top toolbar with prominent Export button
+        toolbar = ttk.Frame(main_frame)
+        toolbar.pack(side=tk.TOP, fill=tk.X, pady=(0, 10))
+        
+        ttk.Button(toolbar, text="Preview", command=self.update_preview).pack(side=tk.LEFT)
+        ttk.Button(toolbar, text="Start Export", command=self.start_export).pack(side=tk.LEFT, padx=(10, 0))
         
         # Left control panel (scrollable)
         left_container = ttk.Frame(main_frame)
@@ -87,6 +95,63 @@ class WatermarkApp:
         self.create_template_panel(left_panel)
         self.create_preview_panel(right_panel)
         
+    def _resolve_font_path(self, family_name: str) -> Optional[str]:
+        """Resolve a usable TTF/TTC path for the given font family on Windows.
+        Tries common filenames in the Windows Fonts directory and generic fallbacks."""
+        try:
+            windows_dir = os.environ.get('WINDIR', r'C:\\Windows')
+            fonts_dir = os.path.join(windows_dir, 'Fonts')
+            candidates = []
+            # From family name
+            if family_name:
+                base = family_name.replace(' ', '')
+                candidates += [
+                    f"{base}.ttf", f"{base}.ttc",
+                    f"{base}.TTF", f"{base}.TTC",
+                    f"{family_name}.ttf", f"{family_name}.ttc",
+                ]
+            # Common Latin and CJK fonts
+            candidates += [
+                'arial.ttf', 'calibri.ttf', 'times.ttf', 'cour.ttf',
+                'msyh.ttc', 'msyh.ttf', 'msyhbd.ttc',  # Microsoft YaHei
+                'simsun.ttc', 'simhei.ttf',            # SimSun / SimHei
+                'Tahoma.ttf', 'Verdana.ttf'
+            ]
+            for cand in candidates:
+                cand_path = os.path.join(fonts_dir, cand)
+                if os.path.exists(cand_path):
+                    return cand_path
+        except Exception:
+            pass
+        return None
+
+    def _get_truetype_font(self, size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+        """Get a scalable font. Try requested family, then Windows Fonts, then DejaVuSans, else default."""
+        family = None
+        try:
+            family = self.font_family.get()
+        except Exception:
+            family = 'Arial'
+        # 1) Try direct by family (works if Pillow can locate it)
+        try:
+            return ImageFont.truetype(family, size)
+        except Exception:
+            pass
+        # 2) Try resolve Windows font path
+        resolved = self._resolve_font_path(family)
+        if resolved:
+            try:
+                return ImageFont.truetype(resolved, size)
+            except Exception:
+                pass
+        # 3) Try DejaVuSans bundled with PIL
+        try:
+            return ImageFont.truetype('DejaVuSans.ttf', size)
+        except Exception:
+            pass
+        # 4) Fallback to small default bitmap font
+        return ImageFont.load_default()
+
     def create_file_panel(self, parent):
         # File import panel
         file_frame = ttk.LabelFrame(parent, text="File Processing", padding=10)
@@ -154,7 +219,7 @@ class WatermarkApp:
         
         ttk.Label(font_frame, text="Size:").pack(side=tk.LEFT, padx=(10, 0))
         self.font_size = tk.IntVar(value=self.watermark_config['font_size'])
-        font_size_spin = ttk.Spinbox(font_frame, from_=8, to=200, textvariable=self.font_size, width=8)
+        font_size_spin = ttk.Spinbox(font_frame, from_=8, to=200, textvariable=self.font_size, width=8, command=self.on_font_change)
         font_size_spin.pack(side=tk.LEFT, padx=(5, 0))
         font_size_spin.bind('<KeyRelease>', self.on_font_change)
         
@@ -170,8 +235,9 @@ class WatermarkApp:
         
         ttk.Label(color_frame, text="Opacity:").pack(side=tk.LEFT, padx=(20, 0))
         self.opacity = tk.IntVar(value=self.watermark_config['opacity'])
-        opacity_scale = ttk.Scale(color_frame, from_=0, to=100, variable=self.opacity, orient=tk.HORIZONTAL)
+        opacity_scale = ttk.Scale(color_frame, from_=0, to=100, variable=self.opacity, orient=tk.HORIZONTAL, command=lambda v: self.on_opacity_change())
         opacity_scale.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(10, 0))
+        # Also update on mouse release for safety
         opacity_scale.bind('<ButtonRelease-1>', self.on_opacity_change)
         
         # Image watermark settings
@@ -193,13 +259,13 @@ class WatermarkApp:
         
         ttk.Label(img_scale_frame, text="Scale:").pack(side=tk.LEFT)
         self.image_scale = tk.DoubleVar(value=self.watermark_config['image_scale'])
-        scale_scale = ttk.Scale(img_scale_frame, from_=0.1, to=2.0, variable=self.image_scale, orient=tk.HORIZONTAL)
+        scale_scale = ttk.Scale(img_scale_frame, from_=0.1, to=2.0, variable=self.image_scale, orient=tk.HORIZONTAL, command=lambda v: self.on_image_scale_change())
         scale_scale.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(10, 0))
         scale_scale.bind('<ButtonRelease-1>', self.on_image_scale_change)
         
         ttk.Label(img_scale_frame, text="Opacity:").pack(side=tk.LEFT, padx=(20, 0))
         self.image_opacity = tk.IntVar(value=self.watermark_config['image_opacity'])
-        img_opacity_scale = ttk.Scale(img_scale_frame, from_=0, to=100, variable=self.image_opacity, orient=tk.HORIZONTAL)
+        img_opacity_scale = ttk.Scale(img_scale_frame, from_=0, to=100, variable=self.image_opacity, orient=tk.HORIZONTAL, command=lambda v: self.on_image_opacity_change())
         img_opacity_scale.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(10, 0))
         img_opacity_scale.bind('<ButtonRelease-1>', self.on_image_opacity_change)
         
@@ -229,7 +295,7 @@ class WatermarkApp:
         
         ttk.Label(rotation_frame, text="Rotation:").pack(side=tk.LEFT)
         self.rotation = tk.IntVar(value=self.watermark_config['rotation'])
-        rotation_scale = ttk.Scale(rotation_frame, from_=-180, to=180, variable=self.rotation, orient=tk.HORIZONTAL)
+        rotation_scale = ttk.Scale(rotation_frame, from_=-180, to=180, variable=self.rotation, orient=tk.HORIZONTAL, command=lambda v: self.on_rotation_change())
         rotation_scale.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(10, 0))
         rotation_scale.bind('<ButtonRelease-1>', self.on_rotation_change)
         
@@ -382,10 +448,16 @@ class WatermarkApp:
         )
         
         if files:
+            prev_empty = len(self.images) == 0
             self.images.extend(files)
             self.update_image_list()
-            if not self.images:
+            if prev_empty and self.images:
                 self.current_image_index = 0
+                try:
+                    self.image_listbox.selection_clear(0, tk.END)
+                    self.image_listbox.selection_set(self.current_image_index)
+                except Exception:
+                    pass
                 self.load_current_image()
     
     def select_folder(self):
@@ -395,13 +467,19 @@ class WatermarkApp:
             folder_path = Path(folder)
             image_extensions = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.webp'}
             
+            prev_empty = len(self.images) == 0
             for file_path in folder_path.rglob('*'):
                 if file_path.suffix.lower() in image_extensions:
                     self.images.append(str(file_path))
             
             self.update_image_list()
-            if self.images:
+            if prev_empty and self.images:
                 self.current_image_index = 0
+                try:
+                    self.image_listbox.selection_clear(0, tk.END)
+                    self.image_listbox.selection_set(self.current_image_index)
+                except Exception:
+                    pass
                 self.load_current_image()
     
     def clear_images(self):
@@ -417,6 +495,13 @@ class WatermarkApp:
         for i, img_path in enumerate(self.images):
             filename = Path(img_path).name
             self.image_listbox.insert(tk.END, f"{i+1}. {filename}")
+        # Keep selection in sync with current index
+        if self.images:
+            try:
+                self.image_listbox.selection_clear(0, tk.END)
+                self.image_listbox.selection_set(self.current_image_index)
+            except Exception:
+                pass
     
     def on_image_select(self, event):
         """Image selection event"""
@@ -495,16 +580,13 @@ class WatermarkApp:
         # Create base transparent overlay sized to the image
         overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
         
-        # Get font
-        try:
-            font = ImageFont.truetype(self.font_family.get(), self.font_size.get())
-        except:
-            font = ImageFont.load_default()
+        # Get font (robust TrueType fallback so watermark is visible)
+        font = self._get_truetype_font(self.font_size.get())
         
-        # Get text
+        # Get text (fallback to current date/time if empty)
         text = self.text_entry.get()
-        if not text:
-            return image
+        if not text or text.strip() == "":
+            text = datetime.now().strftime("%Y-%m-%d %H:%M")
         
         # Measure text size using a temporary draw context
         tmp_draw = ImageDraw.Draw(overlay)
@@ -530,9 +612,11 @@ class WatermarkApp:
         shadow_color = (0, 0, 0, min(255, opacity))
         text_color = (*color, opacity)
         
-        # Draw shadow and text at origin
-        text_draw.text((shadow_offset, shadow_offset), text, font=font, fill=shadow_color)
-        text_draw.text((0, 0), text, font=font, fill=text_color)
+        # Draw shadow and text using bbox offset to avoid clipping ascenders/descenders
+        origin_x = -bbox[0]
+        origin_y = -bbox[1]
+        text_draw.text((origin_x + shadow_offset, origin_y + shadow_offset), text, font=font, fill=shadow_color)
+        text_draw.text((origin_x, origin_y), text, font=font, fill=text_color)
         
         # Apply rotation
         angle = self.rotation.get() if hasattr(self, 'rotation') else 0
@@ -708,30 +792,41 @@ class WatermarkApp:
         self.update_preview()
     
     def select_output_folder(self):
-        """选择输出文件夹"""
-        folder = filedialog.askdirectory(title="选择输出文件夹")
+        """Select output folder"""
+        folder = filedialog.askdirectory(title="Select Output Folder")
         if folder:
             self.output_path_var.set(folder)
             self.output_dir = folder
     
     def start_export(self):
-        """开始导出"""
+        """Start export"""
         if not self.images:
-            messagebox.showwarning("警告", "请先选择要处理的图片")
+            messagebox.showwarning("Warning", "Please select images to process first")
             return
         
         if not self.output_dir:
-            messagebox.showwarning("警告", "请选择输出文件夹")
-            return
+            # Default to ./output if not selected
+            default_out = os.path.join(os.getcwd(), 'output')
+            self.output_dir = default_out
+            try:
+                Path(self.output_dir).mkdir(parents=True, exist_ok=True)
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to create default output folder: {e}")
+                return
+            # Reflect in UI field
+            try:
+                self.output_path_var.set(self.output_dir)
+            except Exception:
+                pass
         
-        # 在后台线程中执行导出
+        # Run export in background thread
         self.progress.start()
         export_thread = threading.Thread(target=self.export_images)
         export_thread.daemon = True
         export_thread.start()
     
     def export_images(self):
-        """导出图片（在后台线程中执行）"""
+        """Export images (executed in background thread)"""
         try:
             output_path = Path(self.output_dir)
             output_path.mkdir(parents=True, exist_ok=True)
@@ -741,18 +836,18 @@ class WatermarkApp:
             
             for i, image_path in enumerate(self.images):
                 try:
-                    # 加载原图
+                    # Load original image
                     original = Image.open(image_path)
                     
-                    # 应用水印
+                    # Apply watermark
                     watermarked = self.apply_watermark(original)
                     
-                    # 生成输出文件名
+                    # Generate output filename
                     input_path = Path(image_path)
                     output_filename = self.generate_output_filename(input_path)
                     output_file = output_path / output_filename
                     
-                    # 保存图片
+                    # Save image
                     if self.output_format.get() == "JPEG":
                         if watermarked.mode == "RGBA":
                             watermarked = watermarked.convert("RGB")
@@ -763,18 +858,18 @@ class WatermarkApp:
                     success_count += 1
                     
                 except Exception as e:
-                    print(f"处理 {image_path} 失败: {e}")
+                    print(f"Failed to process {image_path}: {e}")
             
-            # 在主线程中显示结果
+            # Show result on main thread
             self.root.after(0, self.export_finished, success_count, total_count)
             
         except Exception as e:
-            self.root.after(0, lambda: messagebox.showerror("错误", f"导出失败: {e}"))
+            self.root.after(0, lambda: messagebox.showerror("Error", f"Export failed: {e}"))
         finally:
             self.root.after(0, self.progress.stop)
     
     def generate_output_filename(self, input_path):
-        """生成输出文件名"""
+        """Generate output filename"""
         stem = input_path.stem
         suffix = input_path.suffix
         
@@ -786,17 +881,17 @@ class WatermarkApp:
             return f"{stem}{suffix}"
     
     def export_finished(self, success_count, total_count):
-        """导出完成"""
+        """Export finished"""
         self.progress.stop()
-        messagebox.showinfo("完成", f"导出完成！\n成功处理: {success_count}/{total_count} 张图片")
+        messagebox.showinfo("Done", f"Export completed!\nSuccessfully processed: {success_count}/{total_count} images")
     
     def save_template(self):
-        """保存模板"""
-        template_name = tk.simpledialog.askstring("保存模板", "请输入模板名称:")
+        """Save template"""
+        template_name = tk.simpledialog.askstring("Save Template", "Enter template name:")
         if not template_name:
             return
         
-        # 收集当前设置
+        # Collect current settings
         template = {
             'watermark_type': self.watermark_type.get(),
             'text': self.text_entry.get(),
@@ -814,20 +909,20 @@ class WatermarkApp:
         self.templates[template_name] = template
         self.save_templates()
         self.update_template_list()
-        messagebox.showinfo("成功", f"模板 '{template_name}' 已保存")
+        messagebox.showinfo("Success", f"Template '{template_name}' saved")
     
     def load_template(self):
-        """加载模板"""
+        """Load template"""
         selection = self.template_listbox.curselection()
         if not selection:
-            messagebox.showwarning("警告", "请选择要加载的模板")
+            messagebox.showwarning("Warning", "Please select a template to load")
             return
         
         template_name = self.template_listbox.get(selection[0])
         if template_name in self.templates:
             template = self.templates[template_name]
             
-            # 应用模板设置
+            # Apply template settings
             self.watermark_type.set(template['watermark_type'])
             self.text_entry.delete(0, tk.END)
             self.text_entry.insert(0, template['text'])
@@ -844,38 +939,38 @@ class WatermarkApp:
                 self.image_path_var.set(template['image_path'])
                 self.watermark_config['image_path'] = template['image_path']
             
-            # 更新界面
+            # Update UI
             self.on_watermark_type_change()
             self.update_preview()
             
-            messagebox.showinfo("成功", f"模板 '{template_name}' 已加载")
+            messagebox.showinfo("Success", f"Template '{template_name}' loaded")
     
     def delete_template(self):
-        """删除模板"""
+        """Delete template"""
         selection = self.template_listbox.curselection()
         if not selection:
-            messagebox.showwarning("警告", "请选择要删除的模板")
+            messagebox.showwarning("Warning", "Please select a template to delete")
             return
         
         template_name = self.template_listbox.get(selection[0])
-        if messagebox.askyesno("确认", f"确定要删除模板 '{template_name}' 吗？"):
+        if messagebox.askyesno("Confirm", f"Are you sure to delete template '{template_name}'?"):
             del self.templates[template_name]
             self.save_templates()
             self.update_template_list()
-            messagebox.showinfo("成功", f"模板 '{template_name}' 已删除")
+            messagebox.showinfo("Success", f"Template '{template_name}' deleted")
     
     def on_template_double_click(self, event):
-        """双击模板加载"""
+        """Double click to load template"""
         self.load_template()
     
     def update_template_list(self):
-        """更新模板列表"""
+        """Update template list"""
         self.template_listbox.delete(0, tk.END)
         for template_name in self.templates.keys():
             self.template_listbox.insert(tk.END, template_name)
     
     def load_templates(self):
-        """加载模板"""
+        """Load templates"""
         try:
             config_file = Path("watermark_templates.json")
             if config_file.exists():
@@ -883,16 +978,16 @@ class WatermarkApp:
                     self.templates = json.load(f)
                 self.update_template_list()
         except Exception as e:
-            print(f"加载模板失败: {e}")
+            print(f"Failed to load templates: {e}")
     
     def save_templates(self):
-        """保存模板"""
+        """Save templates"""
         try:
             config_file = Path("watermark_templates.json")
             with open(config_file, 'w', encoding='utf-8') as f:
                 json.dump(self.templates, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            print(f"保存模板失败: {e}")
+            print(f"Failed to save templates: {e}")
 
 
 def main():
