@@ -433,6 +433,9 @@ class WatermarkApp:
     
     def select_images(self):
         """Select image files"""
+        # Default behavior: clear existing list before new selection
+        if self.images:
+            self.clear_images()
         filetypes = [
             ('Image Files', '*.jpg *.jpeg *.png *.bmp *.tiff *.webp'),
             ('JPEG Files', '*.jpg *.jpeg'),
@@ -462,6 +465,9 @@ class WatermarkApp:
     
     def select_folder(self):
         """Select folder"""
+        # Default behavior: clear existing list before new selection
+        if self.images:
+            self.clear_images()
         folder = filedialog.askdirectory(title="Select Image Folder")
         if folder:
             folder_path = Path(folder)
