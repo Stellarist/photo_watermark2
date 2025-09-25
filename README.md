@@ -1,6 +1,6 @@
-# Photo Watermark Tool - Windows Edition
+# Photo Watermark Tool 
 
-A full-featured Windows desktop application for adding text or image watermarks to photos. Supports batch processing, real-time preview, and template management.
+A full-featured desktop application for adding text or image watermarks to photos. Supports batch processing, real-time preview, and template management.
 
 ## Features
 
@@ -82,13 +82,6 @@ python watermark_gui.py
 - **Batch Processing**
 - **Format Conversion**
 
-## System Requirements
-
-- **OS**: Windows 10/11
-- **Python**: 3.7+
-- **Memory**: 4GB+ recommended
-- **Disk**: 100MB free space
-
 ## Tech
 
 - **UI**: Tkinter
@@ -112,10 +105,3 @@ python watermark_gui.py
 - EXIF date watermarking
 - CLI arguments
 - Basic file processing
-
-## Notes
-
-- Use transparent PNG watermark images for best results
-- For many images, export in batches to avoid high memory usage
-- Template file is stored at `watermark_templates.json`
-- Supports Unicode filenames and paths
