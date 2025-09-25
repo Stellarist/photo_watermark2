@@ -464,9 +464,8 @@ class WatermarkApp:
         if image.mode != "RGBA":
             image = image.convert("RGBA")
         
-        # Create transparent layer
+        # Create base transparent overlay sized to the image
         overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
-        draw = ImageDraw.Draw(overlay)
         
         # Get font
         try:
@@ -479,12 +478,11 @@ class WatermarkApp:
         if not text:
             return image
         
-        # Calculate text position
-        bbox = draw.textbbox((0, 0), text, font=font)
+        # Measure text size using a temporary draw context
+        tmp_draw = ImageDraw.Draw(overlay)
+        bbox = tmp_draw.textbbox((0, 0), text, font=font)
         text_width = bbox[2] - bbox[0]
         text_height = bbox[3] - bbox[1]
-        
-        position = self.get_watermark_position(image.size, (text_width, text_height))
         
         # Get color and opacity
         try:
@@ -494,17 +492,30 @@ class WatermarkApp:
         
         opacity = int(self.opacity.get() * 2.55)  # Convert to 0-255 range
         
-        # Draw text (with shadow effect)
+        # Create a separate watermark layer sized to the text, draw text then rotate
         shadow_offset = 2
+        text_layer_w = text_width + shadow_offset
+        text_layer_h = text_height + shadow_offset
+        text_layer = Image.new("RGBA", (text_layer_w, text_layer_h), (0, 0, 0, 0))
+        text_draw = ImageDraw.Draw(text_layer)
+        
         shadow_color = (0, 0, 0, min(255, opacity))
         text_color = (*color, opacity)
         
-        # Draw shadow
-        draw.text((position[0] + shadow_offset, position[1] + shadow_offset), 
-                 text, font=font, fill=shadow_color)
+        # Draw shadow and text at origin
+        text_draw.text((shadow_offset, shadow_offset), text, font=font, fill=shadow_color)
+        text_draw.text((0, 0), text, font=font, fill=text_color)
         
-        # Draw text
-        draw.text(position, text, font=font, fill=text_color)
+        # Apply rotation
+        angle = self.rotation.get() if hasattr(self, 'rotation') else 0
+        if angle:
+            text_layer = text_layer.rotate(angle, expand=True, resample=Image.Resampling.BICUBIC)
+        
+        # Compute position based on rotated size
+        position = self.get_watermark_position(image.size, text_layer.size)
+        
+        # Paste rotated text layer onto overlay using its alpha
+        overlay.paste(text_layer, position, text_layer)
         
         # Merge layers
         return Image.alpha_composite(image, overlay)
@@ -530,6 +541,11 @@ class WatermarkApp:
                 alpha = watermark_img.split()[-1]
                 alpha = alpha.point(lambda p: int(p * opacity / 255))
                 watermark_img.putalpha(alpha)
+            
+            # Apply rotation if any
+            angle = self.rotation.get() if hasattr(self, 'rotation') else 0
+            if angle:
+                watermark_img = watermark_img.rotate(angle, expand=True, resample=Image.Resampling.BICUBIC)
             
             # Calculate position
             position = self.get_watermark_position(image.size, watermark_img.size)
